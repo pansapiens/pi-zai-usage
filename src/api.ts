@@ -16,6 +16,7 @@ interface ZaiUsageResponse {
     limits: ZaiLimit[];
   };
   success: boolean;
+  msg?: string;
 }
 
 interface ZaiApiError {
@@ -43,8 +44,8 @@ export async function fetchZaiUsage(apiKey: string): Promise<ZaiUsageData> {
   const json: ZaiUsageResponse | ZaiApiError =
     (await response.json()) as ZaiUsageResponse | ZaiApiError;
 
-  if ("msg" in json) {
-    throw new Error(`Z.ai API error: ${json.msg}`);
+  if (!json.success) {
+    throw new Error(`Z.ai API error: ${(json as ZaiApiError).msg}`);
   }
 
   const usageResponse = json;

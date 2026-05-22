@@ -136,6 +136,31 @@ describe("fetchZaiUsage", () => {
     expect(result.percentage).toBe(0.1);
   });
 
+  it("returns usage data when success response includes msg field", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockFetchResponse({
+        success: true,
+        msg: "Operation successful",
+        data: {
+          limits: [
+            {
+              type: "TOKENS_LIMIT",
+              percentage: 12.34,
+              nextResetTime: 1700000000000,
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = await fetchZaiUsage("test-key");
+
+    expect(result).toEqual({
+      percentage: 12.3,
+      resetTimeMs: 1700000000000,
+    });
+  });
+
   it("throws on API error response with msg", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockFetchResponse({
