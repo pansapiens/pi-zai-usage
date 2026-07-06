@@ -40,14 +40,26 @@ async function doRefresh(ctx: ExtensionContext): Promise<void> {
   }
 }
 
+function formatTimeUntilReset(resetTimeMs: number | undefined): string {
+  if (!resetTimeMs) return "";
+  const now = Date.now();
+  const diff = Math.max(0, resetTimeMs - now);
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+
+  return parts.length > 0 ? `(${parts.join(" ")})` : "";
+}
+
 function publishStatus(ctx: ExtensionContext, data: ZaiUsageData): void {
-  ctx.ui.setStatus(
-    "zai-usage",
-    JSON.stringify({
-      percentage: data.percentage,
-      resetTimeMs: data.resetTimeMs,
-    }),
-  );
+  const resetText = formatTimeUntilReset(data.resetTimeMs);
+  const compactText = `${data.percentage}% ${resetText}`.trim();
+  ctx.ui.setStatus("zai-usage", compactText);
 }
 
 function clearStatus(ctx: ExtensionContext): void {
