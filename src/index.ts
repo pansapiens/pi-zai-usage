@@ -58,7 +58,7 @@ function formatTimeUntilReset(resetTimeMs: number | undefined): string {
 
 function publishStatus(ctx: ExtensionContext, data: ZaiUsageData): void {
   const resetText = formatTimeUntilReset(data.resetTimeMs);
-  const compactText = `${data.percentage}% ${resetText}`.trim();
+  const compactText = `Z.AI: ${data.percentage}% ${resetText}`.trim();
   ctx.ui.setStatus("zai-usage", compactText);
 }
 
