@@ -1,7 +1,7 @@
 // Z.ai usage monitor extension entry point
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { fetchZaiUsage, isZaiProvider } from "./api.js";
+import { fetchZaiUsage, isZaiProvider, resolveZaiApiKeyProvider } from "./api.js";
 import type { ZaiUsageData } from "./api.js";
 import { UsageCache } from "./usage-cache.js";
 
@@ -29,7 +29,8 @@ async function doRefresh(ctx: ExtensionContext): Promise<void> {
     return;
   }
   try {
-    const apiKey: string | undefined = await ctx.modelRegistry.getApiKeyForProvider("zai");
+    const providerName = resolveZaiApiKeyProvider(ctx.model?.provider);
+    const apiKey: string | undefined = await ctx.modelRegistry.getApiKeyForProvider(providerName);
     if (!apiKey) return;
     const data: ZaiUsageData = await fetchZaiUsage(apiKey);
     cache.set(data);

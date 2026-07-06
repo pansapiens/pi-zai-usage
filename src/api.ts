@@ -25,8 +25,15 @@ interface ZaiApiError {
   success: false;
 }
 
+const ZAI_PROVIDERS = ["zai", "z-ai"];
+
 export function isZaiProvider(provider: string | undefined): boolean {
-  return provider?.toLowerCase().startsWith("zai") ?? false;
+  const p = provider?.toLowerCase() ?? "";
+  return ZAI_PROVIDERS.some((name) => p === name || p.startsWith(name + ".") || p.startsWith(name + "/"));
+}
+
+export function resolveZaiApiKeyProvider(provider: string | undefined): string {
+  return provider?.toLowerCase() ?? "zai";
 }
 
 export async function fetchZaiUsage(apiKey: string): Promise<ZaiUsageData> {
