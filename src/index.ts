@@ -53,7 +53,33 @@ function formatTimeUntilReset(resetTimeMs: number | undefined): string {
   if (hours > 0) parts.push(`${hours}h`);
   if (minutes > 0) parts.push(`${minutes}m`);
 
-  return parts.length > 0 ? `(${parts.join(" ")})` : "";
+  const durationStr = parts.join(" ");
+  if (!durationStr) return "";
+
+  // Add local reset time
+  const resetDate = new Date(resetTimeMs);
+  const nowDate = new Date(now);
+  const isToday =
+    resetDate.getDate() === nowDate.getDate() &&
+    resetDate.getMonth() === nowDate.getMonth() &&
+    resetDate.getFullYear() === nowDate.getFullYear();
+
+  const timeStr = resetDate.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).toLowerCase();
+
+  if (isToday) {
+    return `(${durationStr} @ ${timeStr})`;
+  } else {
+    const dateStr = resetDate.toLocaleDateString("en-US", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).replace(/, /g, "-");
+    return `(${durationStr} @ ${timeStr} ${dateStr})`;
+  }
 }
 
 function publishStatus(ctx: ExtensionContext, data: ZaiUsageData): void {
