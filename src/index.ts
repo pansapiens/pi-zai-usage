@@ -18,7 +18,11 @@ async function refreshUsage(ctx: ExtensionContext): Promise<void> {
 }
 
 async function doRefresh(ctx: ExtensionContext): Promise<void> {
-  if (!ctx.hasUI) return;
+  if (!ctx.hasUI) {
+    console.log("[pi-zai-usage] No UI available");
+    return;
+  }
+  
   console.log("[pi-zai-usage] Refreshing usage data...");
   
   const currentProvider = ctx.model?.provider;
@@ -32,10 +36,16 @@ async function doRefresh(ctx: ExtensionContext): Promise<void> {
   
   const cached: ZaiUsageData | null = cache.get();
   if (cached) {
-    console.log("[pi-zai-usage] Using cached data");
+    console.log("[pi-zai-usage] Using cached data:", JSON.stringify({
+      percentage: cached.percentage,
+      resetTimeMs: cached.resetTimeMs
+    }));
     publishStatus(ctx, cached);
     return;
   }
+  
+  // Show loading status while fetching
+  ctx.ui.setStatus("zai-usage", "Z.AI: loading...");
   
   try {
     const providerName = resolveZaiApiKeyProvider(currentProvider);
@@ -44,6 +54,7 @@ async function doRefresh(ctx: ExtensionContext): Promise<void> {
     const apiKey: string | undefined = await ctx.modelRegistry.getApiKeyForProvider(providerName);
     if (!apiKey) {
       console.log("[pi-zai-usage] No API key found for provider:", providerName);
+      ctx.ui.setStatus("zai-usage", "Z.AI: no API key");
       return;
     }
     
@@ -58,6 +69,7 @@ async function doRefresh(ctx: ExtensionContext): Promise<void> {
     publishStatus(ctx, data);
   } catch (error: unknown) {
     console.error("[pi-zai-usage] Error fetching usage:", error);
+    ctx.ui.setStatus("zai-usage", "Z.AI: error");
   }
 }
 
@@ -143,14 +155,19 @@ export default function (pi: ExtensionAPI): void {
       
       const cached = cache.get();
       if (cached) {
-        const message = `Z.AI Usage: ${cached.percentage}%${formatTimeUntilReset(cached.resetTimeMs)}`;
+        const resetText = formatTimeUntilReset(cached.resetTimeMs);
+        const message = `Z.AI Usage: ${cached.percentage}%${resetText}`;
+        const statusText = `Z.AI: ${cached.percentage}% ${resetText}`.trim();
         ctx.ui.notify(message, "info");
+        ctx.ui.setStatus("zai-usage", statusText);
+        console.log("[pi-zai-usage] Status published:", statusText);
       } else {
         const provider = ctx.model?.provider;
         if (!isZaiProvider(provider)) {
           ctx.ui.notify(`Not using Z.AI provider (current: ${provider})`, "warning");
         } else {
           ctx.ui.notify("Failed to fetch usage data. Check console for errors.", "error");
+          ctx.ui.setStatus("zai-usage", "Z.AI: error");
         }
       }
     },
