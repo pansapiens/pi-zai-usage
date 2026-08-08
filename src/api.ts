@@ -27,9 +27,19 @@ interface ZaiApiError {
 
 const ZAI_PROVIDERS = ["zai", "z-ai"];
 
+// Content-Encodings that Node's zlib module can decompress on every currently
+// supported Node version. "zstd" is deliberately excluded: zlib.createZstdDecompress
+// only exists on Node >=22.15/23.8, and undici throws an uncatchable TypeError
+// (not a rejected promise) when it encounters a zstd response on older Node, which
+// takes down the whole pi process. Rejecting early here keeps that failure inside
+// a normal, catchable Error.
+const SAFE_CONTENT_ENCODINGS = new Set(["identity", "gzip", "deflate", "br"]);
+
 export function isZaiProvider(provider: string | undefined): boolean {
   const p = provider?.toLowerCase() ?? "";
-  return ZAI_PROVIDERS.some((name) => p === name || p.startsWith(name + ".") || p.startsWith(name + "/"));
+  return ZAI_PROVIDERS.some(
+    (name) => p === name || p.startsWith(name + ".") || p.startsWith(name + "/"),
+  );
 }
 
 export function resolveZaiApiKeyProvider(provider: string | undefined): string {
@@ -44,6 +54,11 @@ export async function fetchZaiUsage(apiKey: string): Promise<ZaiUsageData> {
     },
     signal: AbortSignal.timeout(10_000),
   });
+
+  const contentEncoding = response.headers.get("content-encoding");
+  if (contentEncoding && !SAFE_CONTENT_ENCODINGS.has(contentEncoding.toLowerCase())) {
+    throw new Error(`Z.ai API returned unsupported Content-Encoding: ${contentEncoding}`);
+  }
 
   if (!response.ok) {
     throw new Error(`Z.ai API request failed with status ${response.status}`);

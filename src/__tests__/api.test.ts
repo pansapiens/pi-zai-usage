@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { isZaiProvider, fetchZaiUsage } from "../api.js";
 
-function mockFetchResponse(data: unknown, ok = true, status = 200): Response {
+function mockFetchResponse(
+  data: unknown,
+  ok = true,
+  status = 200,
+  contentEncoding: string | null = null,
+): Response {
   return {
     ok,
     status,
+    headers: {
+      get: (name: string) => (name.toLowerCase() === "content-encoding" ? contentEncoding : null),
+    },
     json: vi.fn().mockResolvedValue(data),
   } as unknown as Response;
 }
@@ -296,5 +304,45 @@ describe("fetchZaiUsage", () => {
     );
 
     await expect(fetchZaiUsage("test-key")).rejects.toThrow("status 500");
+  });
+
+  it.each(["identity", "gzip", "deflate", "br", "GZIP"])(
+    "accepts a known-safe Content-Encoding response header (%s)",
+    async (encoding) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse(
+          {
+            success: true,
+            data: { limits: [{ type: "TOKENS_LIMIT", percentage: 10 }] },
+          },
+          true,
+          200,
+          encoding,
+        ),
+      );
+
+      await expect(fetchZaiUsage("test-key")).resolves.toEqual({
+        percentage: 10,
+        resetTimeMs: undefined,
+      });
+    },
+  );
+
+  it("throws a plain, catchable Error instead of reading the body when Content-Encoding is zstd", async () => {
+    const response = mockFetchResponse(
+      { success: true, data: { limits: [{ type: "TOKENS_LIMIT", percentage: 10 }] } },
+      true,
+      200,
+      "zstd",
+    );
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+
+    await expect(fetchZaiUsage("test-key")).rejects.toThrow(
+      "Z.ai API returned unsupported Content-Encoding: zstd",
+    );
+    // The body must never be read for an unsupported encoding: on Node versions whose
+    // zlib lacks zstd support, undici crashes the whole process while decoding the body,
+    // not while resolving fetch()'s promise.
+    expect(response.json).not.toHaveBeenCalled();
   });
 });
