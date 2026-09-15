@@ -27,6 +27,19 @@ interface ZaiApiError {
 
 const ZAI_PROVIDERS = ["zai", "z-ai"];
 
+export interface OpenRouterUsageData {
+  label: string;
+  limit: number | null;
+  limitRemaining: number | null;
+  usageMonthly: number;
+  usageDaily: number;
+  usageWeekly: number;
+  isFreeTier: boolean;
+  expiresAt: string | null;
+  totalCredits: number | null;
+  totalUsage: number | null;
+}
+
 // Content-Encodings that Node's zlib module can decompress on every currently
 // supported Node version. "zstd" is deliberately excluded: zlib.createZstdDecompress
 // only exists on Node >=22.15/23.8, and undici throws an uncatchable TypeError
@@ -88,4 +101,57 @@ export async function fetchZaiUsage(apiKey: string): Promise<ZaiUsageData> {
   const resetTimeMs: number | undefined = tokenLimit.nextResetTime;
 
   return { percentage, resetTimeMs };
+}
+
+export async function fetchOpenRouterUsage(
+  apiKey: string,
+): Promise<OpenRouterUsageData> {
+  const response: Response = await fetch("https://openrouter.ai/api/v1/auth/key", {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenRouter API request failed with status ${response.status}`);
+  }
+
+  const json = (await response.json()) as { data?: Record<string, unknown> };
+  const d = json.data;
+  if (!d) {
+    throw new Error("OpenRouter API response missing data");
+  }
+
+  const data: OpenRouterUsageData = {
+    label: String(d.label ?? "unknown"),
+    limit: typeof d.limit === "number" ? d.limit : null,
+    limitRemaining: typeof d.limit_remaining === "number" ? d.limit_remaining : null,
+    usageMonthly: Number(d.usage_monthly ?? 0),
+    usageDaily: Number(d.usage_daily ?? 0),
+    usageWeekly: Number(d.usage_weekly ?? 0),
+    isFreeTier: Boolean(d.is_free_tier),
+    expiresAt: typeof d.expires_at === "string" ? d.expires_at : null,
+    totalCredits: null,
+    totalUsage: null,
+  };
+
+  // Prepaid credit balance is a separate endpoint; best-effort so a failure
+  // there doesn't discard the quota data already fetched.
+  try {
+    const creditsResponse: Response = await fetch("https://openrouter.ai/api/v1/credits", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (creditsResponse.ok) {
+      const creditsJson = (await creditsResponse.json()) as { data?: Record<string, unknown> };
+      const c = creditsJson.data;
+      if (c) {
+        data.totalCredits = typeof c.total_credits === "number" ? c.total_credits : null;
+        data.totalUsage = typeof c.total_usage === "number" ? c.total_usage : null;
+      }
+    }
+  } catch {
+    // keep quota data, leave credit fields null
+  }
+
+  return data;
 }

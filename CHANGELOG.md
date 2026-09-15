@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 
 - `zai_usage` tool: agent-callable quota report (percentage used + reset time), with optional `refresh` parameter to bypass the 60-second cache. Works in headless sessions and on non-Z.ai providers (returns a diagnostic message instead of failing).
+- `openrouter_usage` tool: agent-callable OpenRouter report (monthly limit, remaining, daily/weekly/monthly spend, prepaid credit balance). Key from pi provider credentials or `OPENROUTER_API_KEY`.
 
 ## [0.1.0] - 2026-05-22
 

@@ -2,7 +2,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { fetchZaiUsage, isZaiProvider, resolveZaiApiKeyProvider } from "./api.js";
+import { fetchOpenRouterUsage, fetchZaiUsage, isZaiProvider, resolveZaiApiKeyProvider } from "./api.js";
 import type { ZaiUsageData } from "./api.js";
 import { UsageCache } from "./usage-cache.js";
 
@@ -195,6 +195,55 @@ export default function (pi: ExtensionAPI): void {
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         return { content: [{ type: "text", text: `Failed to fetch Z.AI usage: ${message}` }], details: { error: message } };
+      }
+    },
+  });
+
+  // Register an agent-callable tool for OpenRouter key usage
+  pi.registerTool({
+    name: "openrouter_usage",
+    label: "OpenRouter Usage",
+    description:
+      "Report OpenRouter API key usage: monthly limit, remaining credit, daily/weekly/monthly spend, and prepaid credit balance. Use when asked about OpenRouter quota, remaining credit, or recent spend.",
+    promptSnippet: "Report OpenRouter API key usage (limit, remaining, spend)",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      try {
+        let apiKey: string | undefined =
+          (await ctx.modelRegistry.getApiKeyForProvider("openrouter")) ||
+          process.env.OPENROUTER_API_KEY;
+        if (!apiKey) {
+          const text =
+            "No OpenRouter API key found (checked pi provider credentials and OPENROUTER_API_KEY env).";
+          return { content: [{ type: "text", text }], details: { error: "no key" } };
+        }
+        const d = await fetchOpenRouterUsage(apiKey);
+        const parts: string[] = [`OpenRouter key ${d.label}: `];
+        if (d.limit !== null && d.limit > 0) {
+          parts.push(
+            `$${d.usageMonthly.toFixed(2)} used of $${d.limit.toFixed(2)} monthly limit ` +
+              `($${(d.limitRemaining ?? 0).toFixed(2)} remaining)`,
+          );
+        } else {
+          parts.push(`$${d.usageMonthly.toFixed(2)} used this month (no limit set)`);
+        }
+        parts.push(`; today $${d.usageDaily.toFixed(2)}, week $${d.usageWeekly.toFixed(2)}`);
+        if (d.totalCredits !== null) {
+          parts.push(
+            `; prepaid credits: $${Math.max(0, d.totalCredits - (d.totalUsage ?? 0)).toFixed(2)} left ` +
+              `(used $${(d.totalUsage ?? 0).toFixed(2)} / $${d.totalCredits.toFixed(2)})`,
+          );
+        }
+        if (d.isFreeTier) parts.push(" [free tier]");
+        if (d.expiresAt) parts.push(`, key expires ${d.expiresAt}`);
+        const text = parts.join("") + ".";
+        return { content: [{ type: "text", text }], details: { report: text } };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Failed to fetch OpenRouter usage: ${message}` }],
+          details: { error: message },
+        };
       }
     },
   });

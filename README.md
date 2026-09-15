@@ -9,6 +9,7 @@
 - Caches responses for 60 seconds to minimize API calls
 - Automatically activates only when a Z.ai provider is selected
 - Exposes a `zai_usage` tool the agent itself can call to check remaining quota
+- Exposes an `openrouter_usage` tool reporting OpenRouter key quota, spend, and prepaid credit balance
 - Gracefully handles network errors, missing API keys, and headless sessions
 
 ## Installation
@@ -42,6 +43,10 @@ The extension registers a `zai_usage` tool that the LLM can invoke during a sess
 | `refresh` | `bool?` | Force a fresh API fetch instead of using the cache (default: `false`) |
 
 The tool returns a plain-text report, e.g. `Z.AI token quota: 62.5% used, resets (2h 15m @ 10:20 am).` It works without a UI and reports a clear message when the active provider is not Z.ai or no API key is configured.
+
+### openrouter_usage
+
+A second tool reports OpenRouter key usage, e.g. `OpenRouter key sk-or-v1-63e...85c: $3.24 used of $50.00 monthly limit ($46.76 remaining); today $0.00, week $0.38; prepaid credits: $46.75 left (used $0.25 / $47.00).` It queries `GET /api/v1/auth/key` (limit, remaining, daily/weekly/monthly spend) plus `GET /api/v1/credits` (prepaid balance, best-effort). The API key is read from pi's provider credentials for `openrouter`, falling back to the `OPENROUTER_API_KEY` environment variable.
 
 ## Events
 
