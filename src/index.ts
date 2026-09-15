@@ -1,6 +1,7 @@
 // Z.ai usage monitor extension entry point
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { fetchZaiUsage, isZaiProvider, resolveZaiApiKeyProvider } from "./api.js";
 import type { ZaiUsageData } from "./api.js";
 import { UsageCache } from "./usage-cache.js";
@@ -126,6 +127,31 @@ function clearStatus(ctx: ExtensionContext): void {
   ctx.ui.setStatus("zai-usage", undefined);
 }
 
+// UI-independent usage lookup for the agent-facing tool: returns a plain-text
+// report, or an error string. Uses the cache unless force is set.
+async function getUsageText(
+  ctx: ExtensionContext,
+  force: boolean,
+): Promise<string> {
+  const provider = ctx.model?.provider;
+  if (!isZaiProvider(provider)) {
+    return `Not on a Z.AI provider (current: ${provider ?? "unknown"}); no Z.AI quota to report.`;
+  }
+  if (force) cache.clear();
+  let data = cache.get();
+  if (!data) {
+    const providerName = resolveZaiApiKeyProvider(provider);
+    const apiKey = await ctx.modelRegistry.getApiKeyForProvider(providerName);
+    if (!apiKey) {
+      return `No API key configured for provider ${providerName}.`;
+    }
+    data = await fetchZaiUsage(apiKey);
+    cache.set(data);
+  }
+  const resetText = formatTimeUntilReset(data.resetTimeMs);
+  return `Z.AI token quota: ${data.percentage}% used${resetText ? `, resets ${resetText}` : ""}.`;
+}
+
 export default function (pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     await refreshUsage(ctx);
@@ -144,6 +170,33 @@ export default function (pi: ExtensionAPI): void {
   });
   pi.on("session_shutdown", (_event, ctx) => {
     clearStatus(ctx);
+  });
+
+  // Register an agent-callable tool so the LLM can check its own quota
+  pi.registerTool({
+    name: "zai_usage",
+    label: "Z.AI Usage",
+    description:
+      "Report Z.AI (GLM) token quota usage for the current API key: percentage of the window quota consumed and the reset time. Use when asked about remaining quota, or before deciding whether to pause work to conserve quota.",
+    promptSnippet:
+      "Report Z.AI token quota usage (percentage consumed and reset time)",
+    parameters: Type.Object({
+      refresh: Type.Optional(
+        Type.Boolean({
+          description:
+            "Force a fresh fetch from the API instead of using the cache (default: false)",
+        }),
+      ),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      try {
+        const text = await getUsageText(ctx, params.refresh ?? false);
+        return { content: [{ type: "text", text }], details: { report: text } };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: "text", text: `Failed to fetch Z.AI usage: ${message}` }], details: { error: message } };
+      }
+    },
   });
 
   // Register slash command to manually refresh usage

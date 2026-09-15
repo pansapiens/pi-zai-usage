@@ -8,6 +8,7 @@
 - Displays a color-coded progress bar in the pi-powerline footer (Line 2, right-aligned)
 - Caches responses for 60 seconds to minimize API calls
 - Automatically activates only when a Z.ai provider is selected
+- Exposes a `zai_usage` tool the agent itself can call to check remaining quota
 - Gracefully handles network errors, missing API keys, and headless sessions
 
 ## Installation
@@ -31,6 +32,16 @@ The published status is consumed by [pi-powerline](https://github.com/harms-haus
 ### Caching
 
 Responses are cached for **60 seconds**. Within the TTL, cached data is returned immediately without an API call. The cache is cleared when the selected provider changes (e.g., switching from Z.ai to another provider). Switching between Z.ai models preserves the cache.
+
+## Agent Tool
+
+The extension registers a `zai_usage` tool that the LLM can invoke during a session:
+
+| Parameter | Type    | Description                                                        |
+| --------- | ------- | ------------------------------------------------------------------ |
+| `refresh` | `bool?` | Force a fresh API fetch instead of using the cache (default: `false`) |
+
+The tool returns a plain-text report, e.g. `Z.AI token quota: 62.5% used, resets (2h 15m @ 10:20 am).` It works without a UI and reports a clear message when the active provider is not Z.ai or no API key is configured.
 
 ## Events
 

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `zai_usage` tool: agent-callable quota report (percentage used + reset time), with optional `refresh` parameter to bypass the 60-second cache. Works in headless sessions and on non-Z.ai providers (returns a diagnostic message instead of failing).
+
 ## [0.1.0] - 2026-05-22
 
 ### Added
