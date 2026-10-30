@@ -7,7 +7,7 @@
 - Fetches Z.ai token quota usage from the official API
 - Displays a color-coded progress bar in the pi-powerline footer (Line 2, right-aligned)
 - Caches responses for 60 seconds to minimize API calls
-- Automatically activates only when a Z.ai provider is selected
+- Works whichever model is active, as long as a Z.ai API key is configured
 - Exposes a `zai_usage` tool the agent itself can call to check remaining quota
 - Exposes an `openrouter_usage` tool reporting OpenRouter key quota, spend, and prepaid credit balance
 - Gracefully handles network errors, missing API keys, and headless sessions
@@ -22,7 +22,7 @@ Then restart pi or run `/reload`.
 
 ## How It Works
 
-When a Z.ai model is selected (provider name starts with `"zai"`), this extension:
+Whenever a Z.ai API key is available (independent of the active model), this extension:
 
 1. Fetches your current token quota from `GET https://api.z.ai/api/monitor/usage/quota/limit`
 2. Extracts the `TOKENS_LIMIT` entry from the response
@@ -32,7 +32,7 @@ The published status is consumed by [pi-powerline](https://github.com/harms-haus
 
 ### Caching
 
-Responses are cached for **60 seconds**. Within the TTL, cached data is returned immediately without an API call. The cache is cleared when the selected provider changes (e.g., switching from Z.ai to another provider). Switching between Z.ai models preserves the cache.
+Responses are cached for **60 seconds**. Within the TTL, cached data is returned immediately without an API call. Quota is per API key, so switching models does not affect the cache.
 
 ## Agent Tool
 
@@ -42,7 +42,7 @@ The extension registers a `zai_usage` tool that the LLM can invoke during a sess
 | --------- | ------- | ------------------------------------------------------------------ |
 | `refresh` | `bool?` | Force a fresh API fetch instead of using the cache (default: `false`) |
 
-The tool returns a plain-text report, e.g. `Z.AI token quota: 62.5% used, resets (2h 15m @ 10:20 am).` It works without a UI and reports a clear message when the active provider is not Z.ai or no API key is configured.
+The tool returns a plain-text report, e.g. `Z.AI token quota: 62.5% used, resets (2h 15m @ 10:20 am).` It works without a UI and whichever model is active, and reports a clear message when no Z.ai API key is configured.
 
 ### openrouter_usage
 
@@ -55,11 +55,10 @@ The extension listens to the following pi lifecycle events:
 | Event              | Behavior                                                                        |
 | ------------------ | ------------------------------------------------------------------------------- |
 | `session_start`    | Fetches and publishes usage data                                                |
-| `model_select`     | Clears the cache if the provider changed, then fetches and publishes usage data |
 | `turn_end`         | Fetches and publishes usage data (respects cache TTL)                           |
 | `session_shutdown` | Clears the status display                                                       |
 
-When no UI is available, all events return early. When the active provider is not Z.ai, the handlers clear any previously published status rather than fetching new data.
+When no UI is available, all events return early. When no Z.ai API key is found, the status is cleared.
 
 ## Status Payload
 
@@ -76,7 +75,7 @@ The extension publishes under the status key `"zai-usage"`:
 
 ## Requirements
 
-- **Z.ai API key** — configure via `/login` for the `zai` provider in pi
+- **Z.ai API key** - configure via `/login` for the `zai` provider in pi, or set `ZAI_API_KEY`. The key is looked up from the active provider if it is a Z.ai one, then `zai`, then any other Z.ai-named provider (`z-ai`, `zai.*`, `zai/*`) pi knows about.
 - **pi-powerline** — renders the progress bar in the footer (optional; without it the status is still published but not displayed)
 
 ## Integration with pi-powerline

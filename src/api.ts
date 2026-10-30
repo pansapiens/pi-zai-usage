@@ -55,10 +55,6 @@ export function isZaiProvider(provider: string | undefined): boolean {
   );
 }
 
-export function resolveZaiApiKeyProvider(provider: string | undefined): string {
-  return provider?.toLowerCase() ?? "zai";
-}
-
 export async function fetchZaiUsage(apiKey: string): Promise<ZaiUsageData> {
   const response: Response = await fetch("https://api.z.ai/api/monitor/usage/quota/limit", {
     headers: {

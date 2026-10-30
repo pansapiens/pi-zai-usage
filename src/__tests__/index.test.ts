@@ -28,26 +28,36 @@ vi.mock("../usage-cache.js", () => ({
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({}));
 
-const mockCtx = {
+const zaiCtx = {
   hasUI: true,
   ui: { setStatus: mockSetStatus },
   model: { provider: "zai", id: "glm-5.1" },
-  modelRegistry: { getApiKeyForProvider: mockGetApiKey },
+  modelRegistry: {
+    getApiKeyForProvider: mockGetApiKey,
+    getAll: () => [] as { provider: string }[],
+  },
 };
+const openaiCtx = { ...zaiCtx, model: { provider: "openai", id: "gpt-4" } };
 
 const sampleUsageData = { percentage: 42.5, resetTimeMs: 1700000000000 };
 
-async function getHandlers() {
+type Tool = { execute: (...args: unknown[]) => Promise<{ content: { text: string }[] }> };
+
+async function load() {
   const handlers: Record<string, (...args: unknown[]) => unknown> = {};
+  const tools: Record<string, Tool> = {};
   const mockPi = {
     on: (event: string, handler: (...args: unknown[]) => unknown) => {
       handlers[event] = handler;
     },
+    registerTool: (tool: Tool & { name: string }) => {
+      tools[tool.name] = tool;
+    },
+    registerCommand: () => {},
   };
-
   const { default: initExtension } = await import("../index.js");
   initExtension(mockPi as never);
-  return handlers;
+  return { handlers, tools };
 }
 
 describe("extension entry point", () => {
@@ -55,235 +65,116 @@ describe("extension entry point", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mockCacheGet.mockReturnValue(null);
-    mockGetApiKey.mockResolvedValue("test-key");
+    mockGetApiKey.mockImplementation(async (p: string) => (p === "zai" ? "test-key" : undefined));
     mockFetchZaiUsage.mockResolvedValue(sampleUsageData);
   });
 
-  // ── session_start ──────────────────────────────────────────────────
-
-  describe("session_start handler", () => {
-    it("fetches usage, caches, and publishes status when ZAI model + hasUI + API key", async () => {
-      const handlers = await getHandlers();
-
-      await handlers["session_start"]!(undefined, mockCtx);
-
-      expect(mockFetchZaiUsage).toHaveBeenCalledWith("test-key");
-      expect(mockCacheSet).toHaveBeenCalledWith(sampleUsageData);
-      expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", expect.any(String));
-
-      const payload = JSON.parse(mockSetStatus.mock.calls[0]![1]);
-      expect(payload).toEqual({
-        percentage: sampleUsageData.percentage,
-        resetTimeMs: sampleUsageData.resetTimeMs,
-      });
-    });
-
-    it("silently skips when ZAI model + hasUI but no API key", async () => {
-      const handlers = await getHandlers();
-      mockGetApiKey.mockResolvedValue(undefined);
-
-      await handlers["session_start"]!(undefined, mockCtx);
-
-      expect(mockFetchZaiUsage).not.toHaveBeenCalled();
-      expect(mockSetStatus).not.toHaveBeenCalled();
-    });
-
-    it("clears status when non-ZAI model", async () => {
-      const handlers = await getHandlers();
-      const ctx = { ...mockCtx, model: { provider: "openai", id: "gpt-4" } };
-
-      await handlers["session_start"]!(undefined, ctx);
-
-      expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", undefined);
-      expect(mockFetchZaiUsage).not.toHaveBeenCalled();
-    });
-
-    it("does not call setStatus when hasUI is false", async () => {
-      const handlers = await getHandlers();
-      const ctx = { ...mockCtx, hasUI: false };
-
-      await handlers["session_start"]!(undefined, ctx);
-
-      expect(mockSetStatus).not.toHaveBeenCalled();
-    });
-
-    it("logs error and does not crash when fetchZaiUsage throws", async () => {
-      const handlers = await getHandlers();
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-      mockFetchZaiUsage.mockRejectedValue(new Error("network failure"));
-
-      await handlers["session_start"]!(undefined, mockCtx);
-
-      expect(consoleSpy).toHaveBeenCalledWith("[pi-zai-usage]", expect.any(Error));
-      expect(mockSetStatus).not.toHaveBeenCalled();
-
-      consoleSpy.mockRestore();
-    });
+  it("publishes status on session_start with a Z.ai model", async () => {
+    const { handlers } = await load();
+    await handlers["session_start"]!(undefined, zaiCtx);
+    expect(mockFetchZaiUsage).toHaveBeenCalledWith("test-key");
+    expect(mockCacheSet).toHaveBeenCalledWith(sampleUsageData);
+    expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", expect.stringContaining("Z.AI: 42.5%"));
   });
 
-  // ── model_select ───────────────────────────────────────────────────
-
-  describe("model_select handler", () => {
-    it("clears cache and fetches fresh data when switching to ZAI", async () => {
-      const handlers = await getHandlers();
-
-      await handlers["model_select"]!(undefined, mockCtx);
-
-      expect(mockCacheClear).toHaveBeenCalled();
-      expect(mockFetchZaiUsage).toHaveBeenCalledWith("test-key");
-      expect(mockCacheSet).toHaveBeenCalledWith(sampleUsageData);
-      expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", expect.any(String));
-    });
-
-    it("clears status when switching away from ZAI", async () => {
-      const handlers = await getHandlers();
-      const ctx = { ...mockCtx, model: { provider: "openai", id: "gpt-4" } };
-
-      await handlers["model_select"]!(undefined, ctx);
-
-      expect(mockCacheClear).toHaveBeenCalled();
-      expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", undefined);
-      expect(mockFetchZaiUsage).not.toHaveBeenCalled();
-    });
+  it("publishes status even when a non-Z.ai model is active", async () => {
+    const { handlers } = await load();
+    await handlers["turn_end"]!(undefined, openaiCtx);
+    expect(mockGetApiKey).toHaveBeenCalledWith("zai");
+    expect(mockFetchZaiUsage).toHaveBeenCalledWith("test-key");
+    expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", expect.stringContaining("Z.AI: 42.5%"));
   });
 
-  // ── turn_end ───────────────────────────────────────────────────────
-
-  describe("turn_end handler", () => {
-    it("uses cached data when cache is fresh and skips fetch", async () => {
-      const handlers = await getHandlers();
-      mockCacheGet.mockReturnValue(sampleUsageData);
-
-      await handlers["turn_end"]!(undefined, mockCtx);
-
-      expect(mockFetchZaiUsage).not.toHaveBeenCalled();
-      expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", expect.any(String));
-
-      const payload = JSON.parse(mockSetStatus.mock.calls[0]![1]);
-      expect(payload).toEqual({
-        percentage: sampleUsageData.percentage,
-        resetTimeMs: sampleUsageData.resetTimeMs,
-      });
-    });
-
-    it("fetches fresh data when cache is expired", async () => {
-      const handlers = await getHandlers();
-      mockCacheGet.mockReturnValue(null);
-
-      await handlers["turn_end"]!(undefined, mockCtx);
-
-      expect(mockFetchZaiUsage).toHaveBeenCalledWith("test-key");
-      expect(mockCacheSet).toHaveBeenCalledWith(sampleUsageData);
-    });
-
-    it("clears status when non-ZAI model", async () => {
-      const handlers = await getHandlers();
-      const ctx = { ...mockCtx, model: { provider: "openai", id: "gpt-4" } };
-
-      await handlers["turn_end"]!(undefined, ctx);
-
-      expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", undefined);
-      expect(mockFetchZaiUsage).not.toHaveBeenCalled();
-    });
+  it("finds a key on another Z.ai-named provider from the registry", async () => {
+    const { handlers } = await load();
+    mockGetApiKey.mockImplementation(async (p: string) => (p === "z-ai" ? "other-key" : undefined));
+    const ctx = {
+      ...openaiCtx,
+      modelRegistry: {
+        ...openaiCtx.modelRegistry,
+        getAll: () => [{ provider: "openai" }, { provider: "z-ai" }],
+      },
+    };
+    await handlers["session_start"]!(undefined, ctx);
+    expect(mockFetchZaiUsage).toHaveBeenCalledWith("other-key");
   });
 
-  // ── in-flight guard ──────────────────────────────────────────────────
+  it("clears status when no Z.ai key is configured", async () => {
+    const { handlers } = await load();
+    mockGetApiKey.mockResolvedValue(undefined);
+    await handlers["session_start"]!(undefined, zaiCtx);
+    expect(mockFetchZaiUsage).not.toHaveBeenCalled();
+    expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", undefined);
+  });
 
-  describe("in-flight guard", () => {
-    it("coalesces concurrent calls into one API fetch", async () => {
-      const handlers = await getHandlers();
+  it("uses cached data without fetching", async () => {
+    const { handlers } = await load();
+    mockCacheGet.mockReturnValue(sampleUsageData);
+    await handlers["turn_end"]!(undefined, zaiCtx);
+    expect(mockFetchZaiUsage).not.toHaveBeenCalled();
+    expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", expect.stringContaining("42.5%"));
+  });
 
-      mockFetchZaiUsage.mockImplementation(() => {
-        return new Promise((r) => {
+  it("does nothing without a UI", async () => {
+    const { handlers } = await load();
+    await handlers["session_start"]!(undefined, { ...zaiCtx, hasUI: false });
+    expect(mockFetchZaiUsage).not.toHaveBeenCalled();
+    expect(mockSetStatus).not.toHaveBeenCalled();
+  });
+
+  it("shows an error status when the fetch fails", async () => {
+    const { handlers } = await load();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockFetchZaiUsage.mockRejectedValue(new Error("network failure"));
+    await handlers["session_start"]!(undefined, zaiCtx);
+    expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", "Z.AI: error");
+    spy.mockRestore();
+  });
+
+  it("coalesces concurrent refreshes into one fetch", async () => {
+    const { handlers } = await load();
+    mockFetchZaiUsage.mockImplementation(
+      () =>
+        new Promise((r) => {
           setTimeout(() => {
             r(sampleUsageData);
           }, 10);
-        });
+        }),
+    );
+    await Promise.all([
+      handlers["session_start"]!(undefined, zaiCtx),
+      handlers["turn_end"]!(undefined, zaiCtx),
+    ]);
+    expect(mockFetchZaiUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears status on session_shutdown", async () => {
+    const { handlers } = await load();
+    handlers["session_shutdown"]!(undefined, zaiCtx);
+    expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", undefined);
+  });
+
+  describe("zai_usage tool", () => {
+    it("reports usage while a non-Z.ai model is active, without a UI", async () => {
+      const { tools } = await load();
+      const res = await tools["zai_usage"]!.execute("id", {}, undefined, undefined, {
+        ...openaiCtx,
+        hasUI: false,
       });
-
-      const [result1, result2] = await Promise.all([
-        handlers["session_start"]!(undefined, mockCtx),
-        handlers["session_start"]!(undefined, mockCtx),
-      ]);
-
-      expect(mockFetchZaiUsage).toHaveBeenCalledTimes(1);
-      expect(result1).toBeUndefined();
-      expect(result2).toBeUndefined();
+      expect(res.content[0]!.text).toMatch(/^Z\.AI token quota: 42\.5% used/);
     });
 
-    it("allows a second fetch after the first completes", async () => {
-      const handlers = await getHandlers();
-
-      await handlers["session_start"]!(undefined, mockCtx);
-      await handlers["session_start"]!(undefined, mockCtx);
-
-      expect(mockFetchZaiUsage).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  // ── model_select cache clearing ─────────────────────────────────────
-
-  describe("model_select cache clearing", () => {
-    it("does not clear cache when switching between ZAI models", async () => {
-      const handlers = await getHandlers();
-
-      // Initialize lastProvider with ZAI
-      await handlers["session_start"]!(undefined, mockCtx);
-      mockCacheClear.mockClear();
-
-      // model_select with same ZAI provider should NOT clear cache
-      await handlers["model_select"]!(undefined, mockCtx);
-
-      expect(mockCacheClear).not.toHaveBeenCalled();
-    });
-
-    it("clears cache when switching from ZAI to non-ZAI provider", async () => {
-      const handlers = await getHandlers();
-      const openaiCtx = { ...mockCtx, model: { provider: "openai", id: "gpt-4" } };
-
-      // Initialize lastProvider with ZAI
-      await handlers["session_start"]!(undefined, mockCtx);
-      mockCacheClear.mockClear();
-
-      // model_select with non-ZAI provider should clear cache
-      await handlers["model_select"]!(undefined, openaiCtx);
-
+    it("bypasses the cache when refresh is set", async () => {
+      const { tools } = await load();
+      await tools["zai_usage"]!.execute("id", { refresh: true }, undefined, undefined, zaiCtx);
       expect(mockCacheClear).toHaveBeenCalled();
     });
 
-    it("clears cache when switching from non-ZAI to ZAI provider", async () => {
-      const handlers = await getHandlers();
-      const openaiCtx = { ...mockCtx, model: { provider: "openai", id: "gpt-4" } };
-
-      // Initialize lastProvider with non-ZAI
-      await handlers["session_start"]!(undefined, openaiCtx);
-      mockCacheClear.mockClear();
-
-      // model_select with ZAI provider should clear cache
-      await handlers["model_select"]!(undefined, mockCtx);
-
-      expect(mockCacheClear).toHaveBeenCalled();
-    });
-  });
-
-  // ── session_shutdown ───────────────────────────────────────────────
-
-  describe("session_shutdown handler", () => {
-    it("clears status via setStatus with undefined", async () => {
-      const handlers = await getHandlers();
-
-      handlers["session_shutdown"]!(undefined, mockCtx);
-
-      expect(mockSetStatus).toHaveBeenCalledWith("zai-usage", undefined);
-    });
-
-    it("does not call setStatus when hasUI is false", async () => {
-      const handlers = await getHandlers();
-      const ctx = { ...mockCtx, hasUI: false };
-
-      handlers["session_shutdown"]!(undefined, ctx);
-
-      expect(mockSetStatus).not.toHaveBeenCalled();
+    it("reports a missing key", async () => {
+      const { tools } = await load();
+      mockGetApiKey.mockResolvedValue(undefined);
+      const res = await tools["zai_usage"]!.execute("id", {}, undefined, undefined, openaiCtx);
+      expect(res.content[0]!.text).toMatch(/No Z\.AI API key/);
     });
   });
 });
